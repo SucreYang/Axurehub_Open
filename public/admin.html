@@ -1,0 +1,38 @@
+<h1>页面管理</h1>
+
+<input id="title" placeholder="页面标题">
+<textarea id="content" placeholder="HTML 内容"></textarea>
+<button onclick="add()">新增</button>
+
+<ul id="list"></ul>
+
+<script>
+async function load() {
+  const res = await fetch('/pages')
+  const pages = await res.json()
+  list.innerHTML = pages.map(p =>
+    `<li>
+      <a href="/page/${p.id}" target="_blank">${p.title}</a>
+      <button onclick="del('${p.id}')">删除</button>
+    </li>`
+  ).join('')
+}
+
+async function add() {
+  await fetch('/pages', {
+    method: 'POST',
+    body: JSON.stringify({
+      title: title.value,
+      content: content.value
+    })
+  })
+  load()
+}
+
+async function del(id) {
+  await fetch('/pages?id=' + id, { method: 'DELETE' })
+  load()
+}
+
+load()
+</script>
