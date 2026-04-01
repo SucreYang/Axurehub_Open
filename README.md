@@ -37,14 +37,12 @@
 
 ## 🚀 快速部署
 
-### 1. 克隆项目与安装依赖
+### 1. 克隆项目
 ```bash
 # 克隆仓库
 git clone git@github.com:SucreYang/Axurehub_Open.git
 cd Axurehub_Open
 
-# 安装依赖
-npm install
 ```
 
 ### 2. 配置 wrangler.toml
