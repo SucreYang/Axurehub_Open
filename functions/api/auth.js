@@ -19,7 +19,7 @@ export async function onRequest(context) {
 
   if (request.method === "POST") {
     const body = await request.json().catch(() => ({}));
-    const adminPassword = context.env.ADMIN_PASSWORD || "910217";
+    const adminPassword = context.env.ADMIN_PASSWORD;
     const ok = body.password === adminPassword;
     return new Response(JSON.stringify({ ok }), {
       status: ok ? 200 : 403,

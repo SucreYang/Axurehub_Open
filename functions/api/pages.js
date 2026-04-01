@@ -3,7 +3,7 @@
 
 
 function checkAdmin(request, env) {
-  const adminPassword = env.ADMIN_PASSWORD || "910217";
+  const adminPassword = env.ADMIN_PASSWORD;
   return request.headers.get("X-Admin-Key") === adminPassword;
 }
 

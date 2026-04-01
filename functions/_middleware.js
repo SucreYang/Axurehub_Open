@@ -5,7 +5,7 @@ export async function onRequest(context) {
   const url = new URL(request.url);
 
   // --- ⚙️ 配置区域 ---
-  const SITE_PASSWORD = context.env.SITE_PASSWORD || "zhikoudai";
+  const SITE_PASSWORD = context.env.SITE_PASSWORD;
   const COOKIE_NAME = "site_access_token";
   const COOKIE_VALUE = "authorized_user";
   const MAX_AGE = 60 * 60 * 24 * 30; // 30天
