@@ -39,8 +39,8 @@
 
 ### 1. 克隆项目
 ```bash
-git clone <your-repo-url>
-cd cloudflare-pages
+git clone git@github.com:SucreYang/Axurehub_Open.git
+cd Axurehub_Open
 ```
 
 ### 2. 配置 wrangler.toml
