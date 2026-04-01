@@ -1,4 +1,4 @@
-# 📦 Cloudflare Pages CMS (StaticPages)
+# 📦 Axurehub_Open
 
 一个基于 Cloudflare Pages + Functions + KV + R2 构建的超轻量级、全栈 Serverless 内容管理系统。专为托管 **Axure 原型**、**静态 HTML 页面** 以及 **外部链接导航** 而设计。
 
