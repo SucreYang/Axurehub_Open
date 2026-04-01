@@ -2,5 +2,5 @@ name = "staticpages"
 pages_build_output_dir = "."
 
 [vars]
-ADMIN_PASSWORD = "910217"
-SITE_PASSWORD = "zhikoudai"
+ADMIN_PASSWORD = "自行设置"
+SITE_PASSWORD = "自行设置"
