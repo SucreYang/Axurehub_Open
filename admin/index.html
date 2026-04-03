@@ -1238,11 +1238,28 @@
     }
 
     async function deleteProto(name, btn) {
-      if (!confirm(`确定删除原型「${name}」？此操作不可恢复。`)) return;
+      // 替代原生的 window.confirm，使用内联二次确认，防止 Chrome 等浏览器拦截并闪退
+      if (btn.getAttribute('data-confirm') !== 'true') {
+        const originalText = btn.innerHTML;
+        btn.innerHTML = '⚠️ 再次点击确认';
+        btn.style.backgroundColor = 'var(--danger-dark)';
+        btn.style.color = 'white';
+        btn.setAttribute('data-confirm', 'true');
+        
+        // 3秒后自动恢复原状
+        setTimeout(() => {
+          if (btn && btn.parentNode) {
+            btn.innerHTML = originalText;
+            btn.removeAttribute('data-confirm');
+            btn.style.backgroundColor = '';
+            btn.style.color = '';
+          }
+        }, 3000);
+        return;
+      }
 
       // 立即反馈
-      const originalText = btn.textContent;
-      btn.textContent = '正在删除...';
+      btn.innerHTML = '正在删除...';
       btn.disabled = true;
       toast(`正在删除「${name}」，请稍候...`, 'info');
 
@@ -1256,8 +1273,11 @@
         loadProtos();
       } else {
         toast('删除失败', 'error');
-        btn.textContent = originalText;
+        btn.innerHTML = '删除';
         btn.disabled = false;
+        btn.removeAttribute('data-confirm');
+        btn.style.backgroundColor = '';
+        btn.style.color = '';
       }
     }
 
@@ -1342,16 +1362,43 @@
     }
 
     async function deletePage(name, btn) {
-      if (!confirm(`确定删除页面「${name}」？`)) return;
-      btn.textContent = '正在删除...';
+      if (btn.getAttribute('data-confirm') !== 'true') {
+        const originalText = btn.innerHTML;
+        btn.innerHTML = '⚠️ 再次点击确认';
+        btn.style.backgroundColor = 'var(--danger-dark)';
+        btn.style.color = 'white';
+        btn.setAttribute('data-confirm', 'true');
+        
+        setTimeout(() => {
+          if (btn && btn.parentNode) {
+            btn.innerHTML = originalText;
+            btn.removeAttribute('data-confirm');
+            btn.style.backgroundColor = '';
+            btn.style.color = '';
+          }
+        }, 3000);
+        return;
+      }
+
+      btn.innerHTML = '正在删除...';
       btn.disabled = true;
 
       const r = await fetch(`/api/pages?name=${encodeURIComponent(name)}`, {
         method: 'DELETE',
         headers: adminHeaders()
       });
-      if (r.ok) { toast(`已成功删除「${name}」`); loadPages(); }
-      else { toast('删除失败', 'error'); btn.textContent = '删除'; btn.disabled = false; }
+      
+      if (r.ok) { 
+        toast(`已成功删除「${name}」`); 
+        loadPages(); 
+      } else { 
+        toast('删除失败', 'error'); 
+        btn.innerHTML = '删除'; 
+        btn.disabled = false; 
+        btn.removeAttribute('data-confirm');
+        btn.style.backgroundColor = '';
+        btn.style.color = '';
+      }
     }
 
     // ─────────────────────────────────────────────
