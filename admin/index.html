@@ -1199,10 +1199,15 @@
           throw new Error(`网络通讯断开或跨域失败导致文件 ${f.name} 上传失败: ${lastErr?.message}`);
         };
 
-        // 启动并发池：设置为 4 (Safari 对同域最大并发为 6，设定 4 可以预留信道，有效防范队列积压导致的 Load failed)
-        await runConcurrent(fileList, uploadOne, 4);
+        // ========== 阶段三：根据浏览器动态设置并发限制并启动上传 ==========
+        // Safari 由于严格的底层 CORS 与连接数限制，容易造成堵塞崩溃，故使用安全的 4 并发。Chrome 等现代浏览器更强大响应更快，采用 12 并发发榨干性能。
+        const isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
+        const concurrencyLimit = isSafari ? 4 : 12;
+        
+        console.log(`[Upload] 检测到浏览器 ${isSafari ? 'Safari' : 'Chrome/非Safari'}，将应用 ${concurrencyLimit} 并发限制。`);
+        await runConcurrent(fileList, uploadOne, concurrencyLimit);
 
-        // ========== 阶段三：通知 Worker 写入最终清单 ==========
+        // ========== 阶段四：通知 Worker 写入最终清单 ==========
         progressText.textContent = '🏁 正在写入清单...';
         const finishResp = await fetch(`/api/proto?action=finish&name=${encodeURIComponent(name)}`, {
           method: 'POST',
