@@ -1042,38 +1042,40 @@
     });
 
     async function uploadProto() {
-      const name = document.getElementById('proto-name').value.trim();
+      let name = document.getElementById('proto-name').value.trim();
       if (!name) { toast('请填写原型名称', 'error'); return; }
+      name = name.normalize('NFC');
       if (!selectedProtoFiles || (Array.isArray(selectedProtoFiles) && !selectedProtoFiles.length)) {
         toast('请先选择文件夹或压缩包', 'error'); return;
       }
 
       const progressWrap = document.getElementById('proto-progress');
-      const progressBar = document.getElementById('proto-progress-bar');
+      const progressBar  = document.getElementById('proto-progress-bar');
       const progressText = document.getElementById('proto-progress-text');
       progressWrap.classList.add('show');
       progressBar.style.width = '0%';
       progressText.textContent = '准备上传...';
 
-      // ⚠️ 核心重放：浏览器端处理解压、路径剥离与分包上传
-
-      // 1. 整理文件清单 (仅限文件夹)
-      fileList = selectedProtoFiles.map(f => {
-        let p = f.webkitRelativePath || f.name;
-        // 去掉顶级目录，保留内部结构
+      // ── 1. 整理文件清单 ────────────────
+      let fileList = Array.from(selectedProtoFiles).map(f => {
+        const p = (f.webkitRelativePath || f.name).normalize('NFC');
         const relPath = p.includes('/') ? p.substring(p.indexOf('/') + 1) : p;
         return { name: relPath.replace(/\\/g, '/'), data: f };
       });
 
-      if (!fileList.length) { toast('未发现物理文件', 'error'); progressWrap.classList.remove('show'); return; }
+      if (!fileList.length) {
+        toast('未发现文件', 'error');
+        progressWrap.classList.remove('show');
+        return;
+      }
 
-      // 2. 深度自动识别并剥离公共根目录 (Common Root)
-      let commonRoot = "";
+      // ── 2. 剥离公共根目录 ─────────────────
+      let commonRoot = '';
       if (fileList.length > 1) {
         const paths = fileList.map(f => f.name);
-        const first = paths[0].split('/');
-        for (let i = 0; i < first.length - 1; i++) {
-          const prefix = first.slice(0, i + 1).join('/') + '/';
+        const segs  = paths[0].split('/');
+        for (let i = 0; i < segs.length - 1; i++) {
+          const prefix = segs.slice(0, i + 1).join('/') + '/';
           if (paths.every(p => p.startsWith(prefix))) commonRoot = prefix;
           else break;
         }
@@ -1081,66 +1083,142 @@
         commonRoot = fileList[0].name.substring(0, fileList[0].name.lastIndexOf('/') + 1);
       }
 
-      // 应用剥离逻辑
       fileList = fileList.map(f => ({
         name: (commonRoot && f.name.startsWith(commonRoot)) ? f.name.substring(commonRoot.length) : f.name,
-        data: f.data
+        data: f.data,
       }));
 
-      // 3. 并发分批上传机制 (每 50 个文件一组)
-      const BATCH_SIZE = 50;
-      const batches = [];
-      for (let i = 0; i < fileList.length; i += BATCH_SIZE) {
-        batches.push(fileList.slice(i, i + BATCH_SIZE));
-      }
-
-      const totalBatches = batches.length;
-      let completedBatches = 0;
-
-      const uploadBatch = async (batch, index) => {
-        const fd = new FormData();
-        for (const f of batch) {
-          fd.append('file', f.data, f.name);
-        }
-
-        const r = await fetch(`/api/proto?action=upload&name=${encodeURIComponent(name)}`, {
-          method: 'POST',
-          headers: { 'X-Admin-Key': adminKey },
-          body: fd
+      const total = fileList.length;
+      let completed = 0;
+      let signatureMap = new Map();
+      
+      // 定义并发限制执行器
+      const runConcurrent = async (items, fn, limit) => {
+        let i = 0;
+        let running = 0;
+        const errs = [];
+        return new Promise((resolve, reject) => {
+          const next = async () => {
+            if (errs.length > 0) return reject(errs[0]);
+            if (i >= items.length && running === 0) return resolve();
+            if (i >= items.length) return;
+            
+            while (running < limit && i < items.length) {
+              const idx = i++;
+              running++;
+              fn(items[idx], idx).then(() => {
+                running--;
+                next();
+              }).catch(e => {
+                running--;
+                errs.push(e);
+                reject(e);
+              });
+            }
+          };
+          next();
         });
-
-        if (!r.ok) throw new Error(`Batch ${index + 1} 上传失败 (${r.status})`);
-
-        completedBatches++;
-        const pct = Math.round((completedBatches / totalBatches) * 100);
-        progressBar.style.width = pct + '%';
-        progressText.textContent = `🚀 正在上传: ${completedBatches}/${totalBatches} 批次 (${Math.round((completedBatches / totalBatches) * 100)}%)...`;
       };
 
       try {
-        // 并发控制：每次同时跑 3 个 batch
-        for (let i = 0; i < batches.length; i += 3) {
-          const chunk = batches.slice(i, i + 3);
-          await Promise.all(chunk.map((b, idx) => uploadBatch(b, i + idx)));
+        // ========== 阶段一：批量获取所有预签名 URL ==========
+        const BATCH_SIZE = 500; // 提速：每批 500 个文件，减少向 Worker 发起的请求次数
+        for (let i = 0; i < fileList.length; i += BATCH_SIZE) {
+          const chunk = fileList.slice(i, i + BATCH_SIZE);
+          progressText.textContent = `🔑 获取签名 (${i + 1}-${Math.min(i + BATCH_SIZE, total)})...`;
+          
+          const presignResp = await fetch(`/api/proto?action=presign&name=${encodeURIComponent(name)}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-Admin-Key': adminKey },
+            body: JSON.stringify({ files: chunk.map(f => ({ name: f.name })) }),
+          });
+
+          if (!presignResp.ok) {
+            const err = await presignResp.json().catch(() => ({}));
+            throw new Error(`获取签名失败: ${err.error || presignResp.status}`);
+          }
+
+          const { urls } = await presignResp.json();
+          if (urls && Array.isArray(urls)) {
+            urls.forEach(u => signatureMap.set(u.name, u));
+          } else {
+             throw new Error(`后端返回的签名数据结构异常`);
+          }
         }
 
-        // 4. 发送最终清单通知 (Finish)
-        progressText.textContent = '🏁 正在同步文件清单并刷新系统...';
-        const finishR = await fetch(`/api/proto?action=finish&name=${encodeURIComponent(name)}`, {
+        // ========== 阶段二：引入高并发请求池进行上传 ==========
+        progressText.textContent = `🚀 准备并发上传...`;
+        // 为避免频繁触发 DOM 更新导致浏览器卡顿，每百分之一更新一次
+        let lastReportedPct = -1;
+        
+        const uploadOne = async (f) => {
+          const sign = signatureMap.get(f.name);
+          if (!sign || !sign.url) {
+            throw new Error(`文件 ${f.name} 的签名 URL 获取失败`);
+          }
+
+          let lastErr = null;
+          // 增加重试次数到 4 次，大幅增强抗抖动能力
+          const maxAttempts = 4;
+          for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+            try {
+              // 强制规范化并验证 URL 格式，以兼容 Safari 严格的底层网络库
+              const finalUrl = new URL(sign.url).href;
+              
+              const r = await fetch(finalUrl, {
+                method: 'PUT',
+                headers: { 'Content-Type': sign.contentType },
+                body: f.data,
+              });
+
+              if (!r.ok) {
+                const errorText = await r.text();
+                // 碰到 429 Too Many Requests 等限流，直接抛出交由底层 Catch 重试
+                throw new Error(`HTTP ${r.status}: ${errorText}`);
+              }
+              
+              completed++;
+              const pct = Math.round((completed / total) * 100);
+              if (pct !== lastReportedPct || completed === total) {
+                lastReportedPct = pct;
+                progressBar.style.width = pct + '%';
+                progressText.textContent = `🚀 并发上传中: ${completed}/${total} (${pct}%)...`;
+              }
+              return;
+            } catch (err) {
+              lastErr = err;
+              console.warn(`[文件 ${f.name}] 第 ${attempt} 次请求异常:`, err.message);
+              if (attempt < maxAttempts) {
+                // 指数退避重试，延长等待时间 (2s, 4s, 8s)，给 Safari 释放底层 TCP 链接和处理 CORS 的时间
+                const waitTime = Math.pow(2, attempt) * 1000;
+                await new Promise(res => setTimeout(res, waitTime));
+              }
+            }
+          }
+          console.error(`S3 上传彻底溃败 [${f.name}]:`, sign.url);
+          throw new Error(`网络通讯断开或跨域失败导致文件 ${f.name} 上传失败: ${lastErr?.message}`);
+        };
+
+        // 启动并发池：设置为 4 (Safari 对同域最大并发为 6，设定 4 可以预留信道，有效防范队列积压导致的 Load failed)
+        await runConcurrent(fileList, uploadOne, 4);
+
+        // ========== 阶段三：通知 Worker 写入最终清单 ==========
+        progressText.textContent = '🏁 正在写入清单...';
+        const finishResp = await fetch(`/api/proto?action=finish&name=${encodeURIComponent(name)}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'X-Admin-Key': adminKey },
-          body: JSON.stringify({ files: fileList.map(f => f.name) })
+          body: JSON.stringify({ files: fileList.map(f => f.name) }),
         });
 
-        if (!finishR.ok) throw new Error('最终状态确认失败');
+        if (!finishResp.ok) throw new Error('清单写入失败');
 
-        progressText.textContent = '✅ 原型就绪！';
-        toast(`原型「${name}」已成功部署，包含 ${fileList.length} 个文件`);
+        progressText.textContent = '✅ 原型部署成功！';
+        toast(`原型「${name}」已上线`, 'success');
         setTimeout(finishUpload, 1000);
 
       } catch (e) {
         console.error(e);
-        toast('上传过程发生错误：' + e.message, 'error');
+        toast('上传失败：' + (e.message || '未知错误'), 'error');
         progressWrap.classList.remove('show');
       }
     }
